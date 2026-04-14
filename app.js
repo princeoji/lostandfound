@@ -1,9 +1,14 @@
 /* ============================================================
    LOST & FOUND — Application Logic
+   (Vercel Blob Storage + Shared API Backend)
    ============================================================ */
 
 (() => {
   'use strict';
+
+  // ─── API Base URL ──────────────────────────────────────────
+  // Uses relative URLs (works both locally with vercel dev and in production)
+  const API_BASE = '/api';
 
   // ─── Default Student Roster ─────────────────────────────────
   // Roll Number Format: YYOO + 320 (college) + CCC (course) + NNN (student no)
@@ -175,21 +180,73 @@
 
   // ─── State ─────────────────────────────────────────────────
   let currentUser = null;
-  let uploadedImageData = null;
+  let uploadedImageFile = null;   // Now stores the raw File object (not base64)
+  let uploadedImagePreview = null; // Local preview URL
   let activeFilter = 'All';
   let currentModalItemId = null;
+  let cachedItems = [];  // In-memory cache of items from API
 
-  // ─── Helpers ───────────────────────────────────────────────
-  function getItems() {
+  // ─── API Helpers ───────────────────────────────────────────
+  async function fetchItems() {
     try {
-      return JSON.parse(localStorage.getItem('lf_items') || '[]');
-    } catch { return []; }
+      const resp = await fetch(`${API_BASE}/items`);
+      if (!resp.ok) throw new Error('Failed to fetch items');
+      cachedItems = await resp.json();
+      return cachedItems;
+    } catch (error) {
+      console.error('fetchItems error:', error);
+      // Fallback to cached items
+      return cachedItems;
+    }
   }
 
-  function saveItems(items) {
-    localStorage.setItem('lf_items', JSON.stringify(items));
+  async function uploadImageToBlob(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const resp = await fetch(`${API_BASE}/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || 'Image upload failed');
+    }
+
+    const data = await resp.json();
+    return data.url; // Vercel Blob public URL
   }
 
+  async function createItem(itemData) {
+    const resp = await fetch(`${API_BASE}/items`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(itemData),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to create item');
+    }
+
+    return await resp.json();
+  }
+
+  async function deleteItem(itemId) {
+    const resp = await fetch(`${API_BASE}/items/${itemId}`, {
+      method: 'DELETE',
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || 'Failed to delete item');
+    }
+
+    return await resp.json();
+  }
+
+  // ─── Local Storage Helpers (for user-specific data) ────────
   function getFoundCount() {
     return parseInt(localStorage.getItem('lf_found_count') || '0');
   }
@@ -301,11 +358,12 @@
   }
 
   // ─── Dashboard ─────────────────────────────────────────────
-  function renderDashboard() {
+  async function renderDashboard() {
     DOM.headerUser.textContent = currentUser.name;
     DOM.welcomeTitle.textContent = `Welcome, ${currentUser.name.split(' ')[0]}!`;
 
-    const items = getItems();
+    // Fetch items from API
+    const items = await fetchItems();
     const today = new Date().toDateString();
 
     // Stats
@@ -319,7 +377,7 @@
     animateNumbers();
 
     // Recent items (last 3)
-    const recent = items.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 3);
+    const recent = [...items].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 3);
     if (recent.length === 0) {
       DOM.recentGrid.classList.add('hidden');
       DOM.recentEmpty.classList.remove('hidden');
@@ -388,19 +446,27 @@
 
     // Attach Mark as Found listeners
     DOM.myListingsGrid.querySelectorAll('.btn-mark-found').forEach(btn => {
-      btn.addEventListener('click', (e) => {
+      btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const itemId = btn.dataset.id;
         const confirmAction = confirm('Owner has collected this item? It will be removed and you earn +20 points!');
         if (!confirmAction) return;
 
-        let items = getItems();
-        items = items.filter(i => i.id !== itemId);
-        saveItems(items);
-        incrementFoundCount();
-        addUserPoints(currentUser.rollNo, POINTS_PER_RETURN);
-        toast(`Item returned! +${POINTS_PER_RETURN} Karma Points 🎉`, 'success');
-        renderDashboard();
+        btn.disabled = true;
+        btn.textContent = 'Removing...';
+
+        try {
+          await deleteItem(itemId);
+          incrementFoundCount();
+          addUserPoints(currentUser.rollNo, POINTS_PER_RETURN);
+          toast(`Item returned! +${POINTS_PER_RETURN} Karma Points 🎉`, 'success');
+          await renderDashboard();
+        } catch (error) {
+          console.error('Mark as found error:', error);
+          toast('Failed to remove item. Please try again.', 'error');
+          btn.disabled = false;
+          btn.textContent = 'Mark as Found';
+        }
       });
     });
   }
@@ -455,8 +521,7 @@
     container.querySelectorAll('.item-card').forEach(card => {
       card.addEventListener('click', () => {
         const id = card.dataset.id;
-        const items = getItems();
-        const item = items.find(i => i.id === id);
+        const item = cachedItems.find(i => i.id === id);
         if (item) openModal(item);
       });
     });
@@ -477,6 +542,10 @@
       DOM.modalAvatar.textContent = getInitials(student.name);
       DOM.modalName.textContent = student.name;
       DOM.modalRoll.textContent = student.rollNo;
+    } else if (item.uploaderName) {
+      DOM.modalAvatar.textContent = getInitials(item.uploaderName);
+      DOM.modalName.textContent = item.uploaderName;
+      DOM.modalRoll.textContent = item.uploadedBy;
     } else {
       DOM.modalAvatar.textContent = '?';
       DOM.modalName.textContent = 'Unknown';
@@ -514,10 +583,14 @@
       return;
     }
 
+    // Store the raw File for upload to Vercel Blob later
+    uploadedImageFile = file;
+
+    // Create a local preview
     const reader = new FileReader();
     reader.onload = (e) => {
-      uploadedImageData = e.target.result;
-      DOM.imagePreview.src = uploadedImageData;
+      uploadedImagePreview = e.target.result;
+      DOM.imagePreview.src = uploadedImagePreview;
       DOM.imagePreview.classList.remove('hidden');
       DOM.removeImage.classList.remove('hidden');
       DOM.dropPrompt.classList.add('hidden');
@@ -526,7 +599,8 @@
   }
 
   function clearImage() {
-    uploadedImageData = null;
+    uploadedImageFile = null;
+    uploadedImagePreview = null;
     DOM.imagePreview.src = '';
     DOM.imagePreview.classList.add('hidden');
     DOM.removeImage.classList.add('hidden');
@@ -549,11 +623,11 @@
 
   // ─── Find / Search ─────────────────────────────────────────
   function renderFindGrid() {
-    const items = getItems();
+    const items = cachedItems; // Use cached items from last fetch
     const query = DOM.searchInput.value.toLowerCase().trim();
 
     // Filter
-    let filtered = items;
+    let filtered = [...items];
 
     if (activeFilter !== 'All') {
       filtered = filtered.filter(i => i.category === activeFilter);
@@ -595,43 +669,58 @@
   }
 
   // ─── Submit Item ───────────────────────────────────────────
-  function submitItem() {
+  async function submitItem() {
     const category = DOM.itemCategory.value;
     const description = DOM.itemDescription.value.trim();
     const location = DOM.itemLocation.value;
 
-    if (!uploadedImageData) { toast('Please upload an image of the item.', 'error'); return; }
+    if (!uploadedImageFile) { toast('Please upload an image of the item.', 'error'); return; }
     if (!category) { toast('Please select a category.', 'error'); return; }
     if (!description) { toast('Please add a description.', 'error'); return; }
     if (!location) { toast('Please select the location.', 'error'); return; }
 
-    const item = {
-      id: 'item_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-      image: uploadedImageData,
-      category,
-      description,
-      location,
-      uploadedBy: currentUser.rollNo,
-      timestamp: new Date().toISOString(),
-    };
-
-    const items = getItems();
-    items.push(item);
-    saveItems(items);
-
-    // Reset form
-    clearImage();
-    DOM.listItemForm.reset();
-    DOM.categorySuggestion.classList.add('hidden');
-
-    // Show loading state briefly
+    // Show loading state
     DOM.submitItemBtn.classList.add('loading');
-    setTimeout(() => {
+    DOM.submitItemBtn.disabled = true;
+
+    try {
+      // Step 1: Upload image to Vercel Blob
+      toast('Uploading image...', 'info');
+      const imageUrl = await uploadImageToBlob(uploadedImageFile);
+
+      // Step 2: Create item with the blob URL
+      const itemData = {
+        image: imageUrl,
+        category,
+        description,
+        location,
+        uploadedBy: currentUser.rollNo,
+        uploaderName: currentUser.name,
+      };
+
+      await createItem(itemData);
+
+      // Award points for listing
+      addUserPoints(currentUser.rollNo, POINTS_PER_LISTING);
+
+      // Reset form
+      clearImage();
+      DOM.listItemForm.reset();
+      DOM.categorySuggestion.classList.add('hidden');
+
       DOM.submitItemBtn.classList.remove('loading');
-      toast('Item listed successfully! 🎉', 'success');
+      DOM.submitItemBtn.disabled = false;
+
+      toast('Item listed successfully! 🎉 +5 Karma Points', 'success');
       showView('viewDashboard');
-      renderDashboard();
-    }, 800);
+      await renderDashboard();
+
+    } catch (error) {
+      console.error('Submit item error:', error);
+      DOM.submitItemBtn.classList.remove('loading');
+      DOM.submitItemBtn.disabled = false;
+      toast('Failed to submit item: ' + error.message, 'error');
+    }
   }
 
   // ─── Event Listeners ──────────────────────────────────────
@@ -643,7 +732,7 @@
       const dob = DOM.loginDob.value;
 
       DOM.loginBtn.classList.add('loading');
-      setTimeout(() => {
+      setTimeout(async () => {
         const student = login(rollNo, dob);
         DOM.loginBtn.classList.remove('loading');
         if (student) {
@@ -651,7 +740,7 @@
           sessionStorage.setItem('lf_session', JSON.stringify({ rollNo: student.rollNo }));
           toast(`Welcome, ${student.name}!`, 'success');
           showView('viewDashboard');
-          renderDashboard();
+          await renderDashboard();
         } else {
           toast('Invalid roll number or date of birth.', 'error');
         }
@@ -717,18 +806,20 @@
 
     // Dashboard actions
     DOM.actionList.addEventListener('click', () => showView('viewList'));
-    DOM.actionFind.addEventListener('click', () => {
+    DOM.actionFind.addEventListener('click', async () => {
       showView('viewFind');
       // Show skeleton briefly
       DOM.skeletonGrid.classList.remove('hidden');
       DOM.findGrid.classList.add('hidden');
       DOM.findEmpty.classList.add('hidden');
-      setTimeout(() => renderFindGrid(), 500);
+      // Fetch fresh items from API
+      await fetchItems();
+      setTimeout(() => renderFindGrid(), 300);
     });
 
     // Navigation back
-    DOM.listBackBtn.addEventListener('click', () => { showView('viewDashboard'); renderDashboard(); });
-    DOM.findBackBtn.addEventListener('click', () => { showView('viewDashboard'); renderDashboard(); });
+    DOM.listBackBtn.addEventListener('click', async () => { showView('viewDashboard'); await renderDashboard(); });
+    DOM.findBackBtn.addEventListener('click', async () => { showView('viewDashboard'); await renderDashboard(); });
 
     // Image upload
     DOM.dropZone.addEventListener('click', (e) => {
@@ -801,30 +892,40 @@
       if (e.key === 'Escape' && !DOM.revealModal.classList.contains('hidden')) closeModal();
     });
 
-    // Mark as Found
-    DOM.markFoundBtn.addEventListener('click', () => {
+    // Mark as Found (from modal)
+    DOM.markFoundBtn.addEventListener('click', async () => {
       if (!currentModalItemId) return;
       const confirmAction = confirm('Are you sure the owner has collected this item? This will remove it from the listings.');
       if (!confirmAction) return;
 
-      let items = getItems();
-      items = items.filter(i => i.id !== currentModalItemId);
-      saveItems(items);
-      incrementFoundCount();
-      closeModal();
-      toast('Item marked as returned! 🎉 Great job!', 'success');
+      DOM.markFoundBtn.disabled = true;
+      DOM.markFoundBtn.querySelector('span').textContent = 'Removing...';
 
-      // Re-render whichever view is visible
-      if (!DOM.viewDashboard.classList.contains('hidden')) {
-        renderDashboard();
-      } else if (!DOM.viewFind.classList.contains('hidden')) {
-        renderFindGrid();
+      try {
+        await deleteItem(currentModalItemId);
+        incrementFoundCount();
+        addUserPoints(currentUser.rollNo, POINTS_PER_RETURN);
+        closeModal();
+        toast('Item marked as returned! 🎉 +20 Karma Points', 'success');
+
+        // Re-render whichever view is visible
+        if (!DOM.viewDashboard.classList.contains('hidden')) {
+          await renderDashboard();
+        } else if (!DOM.viewFind.classList.contains('hidden')) {
+          await fetchItems();
+          renderFindGrid();
+        }
+      } catch (error) {
+        console.error('Mark as found error:', error);
+        toast('Failed to remove item. Please try again.', 'error');
+        DOM.markFoundBtn.disabled = false;
+        DOM.markFoundBtn.querySelector('span').textContent = 'Mark as Found — Owner Collected';
       }
     });
   }
 
   // ─── Init ──────────────────────────────────────────────────
-  function init() {
+  async function init() {
     // Dismiss loading screen
     setTimeout(() => {
       DOM.loadingScreen.classList.add('fade-out');
@@ -836,125 +937,13 @@
     // Check for existing session
     if (checkSession()) {
       showView('viewDashboard');
-      renderDashboard();
+      await renderDashboard();
     } else {
       showView('viewLogin');
     }
   }
 
-  // ─── Seed Demo Data (first run only) ──────────────────────
-  function seedDemoData() {
-    // Reset stale seed data (old roll number format)
-    const existingSeeded = localStorage.getItem('lf_seeded');
-    if (existingSeeded === 'true') {
-      const items = getItems();
-      const hasOldFormat = items.some(i => i.uploadedBy && i.uploadedBy.includes('CS'));
-      if (hasOldFormat) {
-        localStorage.removeItem('lf_seeded');
-        localStorage.removeItem('lf_items');
-        localStorage.removeItem('lf_students');
-      }
-    }
-    if (localStorage.getItem('lf_seeded')) return;
-
-    // Create placeholder images as colored canvases with icons
-    function generatePlaceholderImage(text, color1, color2) {
-      const canvas = document.createElement('canvas');
-      canvas.width = 400;
-      canvas.height = 300;
-      const ctx = canvas.getContext('2d');
-
-      // Gradient background
-      const grad = ctx.createLinearGradient(0, 0, 400, 300);
-      grad.addColorStop(0, color1);
-      grad.addColorStop(1, color2);
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, 400, 300);
-
-      // Subtle pattern
-      ctx.fillStyle = 'rgba(255,255,255,0.05)';
-      for (let i = 0; i < 12; i++) {
-        const x = Math.random() * 400;
-        const y = Math.random() * 300;
-        const r = 20 + Math.random() * 40;
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // Text
-      ctx.fillStyle = 'rgba(255,255,255,0.9)';
-      ctx.font = '600 28px Inter, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(text, 200, 150);
-
-      return canvas.toDataURL('image/jpeg', 0.7);
-    }
-
-    const demoItems = [
-      {
-        id: 'demo_1',
-        image: generatePlaceholderImage('🔑  Silver Keys', '#1a1a2e', '#16213e'),
-        category: 'Keys',
-        description: 'Set of 3 silver keys found on a blue keychain with a small torch. Found near the entrance gate.',
-        location: 'Parking',
-        uploadedBy: '2200320101003',
-        timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-      },
-      {
-        id: 'demo_2',
-        image: generatePlaceholderImage('📱  Smartphone', '#0f3460', '#533483'),
-        category: 'Phone',
-        description: 'Black Samsung phone with a cracked screen protector. Found under a desk in room 204.',
-        location: 'Classroom',
-        uploadedBy: '2200320102005',
-        timestamp: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
-      },
-      {
-        id: 'demo_3',
-        image: generatePlaceholderImage('🪪  ID Card', '#1b1b2f', '#162447'),
-        category: 'ID Card',
-        description: 'College ID card found on the floor. The name is partially visible. Blue lanyard attached.',
-        location: 'Library',
-        uploadedBy: '2300320100008',
-        timestamp: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString(),
-      },
-      {
-        id: 'demo_4',
-        image: generatePlaceholderImage('👛  Brown Wallet', '#2d132c', '#801336'),
-        category: 'Wallet',
-        description: 'Brown leather wallet with some cash and cards inside. No visible name. Found at a table.',
-        location: 'Canteen',
-        uploadedBy: '2200320100001',
-        timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-      },
-      {
-        id: 'demo_5',
-        image: generatePlaceholderImage('🎧  Earphones', '#1a1a2e', '#0f3460'),
-        category: 'Earphones',
-        description: 'White wireless earbuds in a charging case. Brand seems to be boAt. Found on a bench.',
-        location: 'Sports Ground',
-        uploadedBy: '2300320106006',
-        timestamp: new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString(),
-      },
-      {
-        id: 'demo_6',
-        image: generatePlaceholderImage('🍶  Water Bottle', '#1b262c', '#0f4c75'),
-        category: 'Bottle',
-        description: 'Blue Milton water bottle with stickers on it. 750ml size. Found after class hours.',
-        location: 'Classroom',
-        uploadedBy: '2300320107010',
-        timestamp: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
-      },
-    ];
-
-    saveItems(demoItems);
-    localStorage.setItem('lf_seeded', 'true');
-  }
-
   // Run
-  seedDemoData();
   document.addEventListener('DOMContentLoaded', init);
 
 })();
