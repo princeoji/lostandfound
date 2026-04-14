@@ -114,6 +114,7 @@
 
     // Header
     headerUser: $('#headerUser'),
+    storageBadge: $('#storageBadge'),
     welcomeTitle: $('#welcomeTitle'),
 
     // Dashboard
@@ -231,6 +232,28 @@
     }
 
     return await resp.json();
+  }
+
+  async function refreshStorageBadge() {
+    if (!DOM.storageBadge) return;
+
+    DOM.storageBadge.className = 'storage-badge storage-badge--loading';
+    DOM.storageBadge.textContent = 'Storage: checking...';
+
+    try {
+      const resp = await fetch(`${API_BASE}/health/storage`);
+      if (!resp.ok) throw new Error('health endpoint failed');
+
+      const data = await resp.json();
+      const isBlob = data.storageMode === 'vercel-blob';
+
+      DOM.storageBadge.className = `storage-badge ${isBlob ? 'storage-badge--blob' : 'storage-badge--fallback'}`;
+      DOM.storageBadge.textContent = isBlob ? 'Storage: Blob' : 'Storage: Local';
+    } catch (error) {
+      console.error('refreshStorageBadge error:', error);
+      DOM.storageBadge.className = 'storage-badge storage-badge--unknown';
+      DOM.storageBadge.textContent = 'Storage: unknown';
+    }
   }
 
   async function deleteItem(itemId) {
@@ -361,6 +384,7 @@
   async function renderDashboard() {
     DOM.headerUser.textContent = currentUser.name;
     DOM.welcomeTitle.textContent = `Welcome, ${currentUser.name.split(' ')[0]}!`;
+    await refreshStorageBadge();
 
     // Fetch items from API
     const items = await fetchItems();

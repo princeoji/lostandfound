@@ -417,6 +417,39 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
   color: var(--text-secondary);
 }
 
+.storage-badge {
+  font-size: 12px;
+  line-height: 1;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.storage-badge--loading {
+  color: var(--text-secondary);
+}
+
+.storage-badge--blob {
+  color: #34d399;
+  border-color: rgba(52,211,153,0.45);
+  background: rgba(52,211,153,0.12);
+}
+
+.storage-badge--fallback {
+  color: #fbbf24;
+  border-color: rgba(251,191,36,0.45);
+  background: rgba(251,191,36,0.12);
+}
+
+.storage-badge--unknown {
+  color: #f87171;
+  border-color: rgba(248,113,113,0.45);
+  background: rgba(248,113,113,0.12);
+}
+
 /* ============================================================
    DASHBOARD
    ============================================================ */
@@ -1233,6 +1266,7 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
   .find-main { padding: 16px 16px 48px; }
   .results-info { flex-direction: column; gap: 4px; align-items: flex-start; }
   .header-user { display: none; }
+  .storage-badge { font-size: 11px; padding: 7px 9px; }
   .app-header { padding: 0 16px; }
   .dashboard-sidebar > * { min-width: 100%; }
   .my-listings-grid { flex-direction: column; }
