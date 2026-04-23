@@ -27,8 +27,8 @@
     { rollNo: '2300320107010', name: 'Diya Kapoor', dob: '2004-04-10', year: '2nd Year', course: 'BBA' },
     { rollNo: '2200320101011', name: 'Karthik Menon', dob: '2003-12-22', year: '3rd Year', course: 'B.Tech ECE' },
     { rollNo: '2300320108012', name: 'Ishita Agarwal', dob: '2004-10-05', year: '2nd Year', course: 'B.Sc' },
-    { rollNo: '2300320100193', name: 'Prince Kumar', dob: '2004-12-29', year: '3nd Year', course: 'B.Tech CSE' },
-     { rollNo: 'OPTO-700', name: 'Anshika Goyal', dob: '2004-01-29', year: '3nd Year', course: 'B.Opto' },
+    { rollNo: '2300320100193', name: 'Prince Kumar', dob: '2004-12-29', year: '3rd Year', course: 'B.Tech CSE' },
+     { rollNo: 'OPTO-700', name: 'Anshika Goyal', dob: '2004-01-29', year: '3rd Year', course: 'B.Opto' },
   ];
 
   // ─── Dynamic Student Roster (localStorage-backed) ──────────
@@ -75,7 +75,7 @@
   // ─── Category Emoji Map ────────────────────────────────────
   const CATEGORY_EMOJI = {
     'Keys': '🔑', 'Wallet': '👛', 'Phone': '📱', 'ID Card': '🪪',
-    'Laptop': '💻', 'Charger': '🔌', 'Bottle': '🍶', 'Bag': '🎒',
+    'Laptop': '💻', 'Charger': '🔌', 'Bottle': '🍶', 'Umbrella': '☂️', 'Bag': '🎒',
     'Books': '📚', 'Earphones': '🎧', 'Other': '📦',
     'Watch': '⌚', 'Shoes': '👟', 'Jacket': '🧥', 'Glasses': '👓',
   };
