@@ -5,8 +5,8 @@
   "private": true,
   "description": "College Lost & Found Platform with Vercel Blob Storage",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
+    "start": "node server.dev.js",
+    "dev": "node server.dev.js",
     "vercel-dev": "vercel dev",
     "deploy": "vercel --prod"
   },
