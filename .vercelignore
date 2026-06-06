@@ -1,0 +1,9 @@
+# Prevent server-side dev server from being deployed to Vercel
+server.js
+
+# Local dev artifacts
+data/
+uploads/
+
+# Lockfile not needed
+package-lock.json
